@@ -15,6 +15,7 @@ from google.appengine.api import images
 import jinja2
 import os
 import json
+from math import sin, cos, sqrt, atan2, radians
 
 
 JINJA_ENVIRONMENT = jinja2.Environment(
@@ -113,10 +114,73 @@ class mySubscribe(webapp2.RequestHandler):
 
 
 
+class AndroidViewNearbyPhotos(webapp2.RequestHandler):
+    def get(self, photoIndexes, currentLocation):
+        passedInCoord = currentLocation.split('_')
+        lat = float(passedInCoord[0])
+        lon = float(passedInCoord[1])
+
+        displayImageObjs = []
+        # displayPhotoList = []
+
+        stream_query = Stream.query()
+        for stream in stream_query:
+            photos = db.GqlQuery("SELECT * FROM Picture " + "WHERE ANCESTOR IS :1 " +"ORDER BY uploaddate DESC" , db.Key.from_path('Stream', stream.name))
+            for photo in photos:
+                photoUrl = images.get_serving_url(photo.imgkey)
+                photoUrl = str(photoUrl) + "=s500"
+
+                photoDict = {}
+                photoDict["photoServingURL"] = photoUrl
+                photoDict["date"] = str(photo.uploaddate)
+                photoDict["loc"] = str(photo.loc)
+                photoDict["streamName"] = str(stream.name)
+                # photoDict["streamID"] = str(stream.key.id())
+                photoCoord = str(photo.loc).split(',')
+                plat = float(photoCoord[0])
+                plon = float(photoCoord[1])
+                R = 6373.0
+
+                lat1 = radians(lat)
+                lon1 = radians(lon)
+                lat2 = radians(plat)
+                lon2 = radians(plon)
+
+                dlon = lon2 - lon1
+                dlat = lat2 - lat1
+                a = (sin(dlat / 2)) ** 2 + cos(lat1) * cos(lat2) * (sin(dlon / 2)) ** 2
+                c = 2 * atan2(sqrt(a), sqrt(1-a))
+                distance = R * c
+                photoDict["actualDistance"] = distance
+                if distance > 10:
+                    photoDict["strDistance"] = str(distance).split('.', 1)[0] + 'km'
+                else:
+                    photoDict["strDistance"] = str(distance * 1000).split('.', 1)[0] + 'm'
+                displayImageObjs.append(photoDict)
+
+        displayImageObjs = sorted(displayImageObjs, key = lambda k: k['actualDistance'])
+        passedPhotos = []
+        morePhotos = "False"
+        indexURL = photoIndexes
+        indexList = str(photoIndexes).split('_')
+        if len(displayImageObjs) - 1 > int(indexList[1]):
+            for i in range(int(indexList[0]), int(indexList[1]) + 1):
+                passedPhotos.append(displayImageObjs[i])
+            indexURL = str(int(indexList[0]) + 16) + '_' + str(int(indexList[1]) + 16)
+            morePhotos = "True"
+        else:
+            for i in range(int(indexList[0]), len(displayImageObjs)):
+                passedPhotos.append(displayImageObjs[i])
+
+        dictPassed = {'user': None, 'morePhotos': morePhotos, 'indexURL': indexURL,'displayImageObjs': passedPhotos}#'displayPhotoList' : displayStreamList
+        jsonObj = json.dumps(dictPassed, sort_keys=True, indent=4, separators=(',', ': '))
+        self.response.write(jsonObj)
+
 
 
 application = webapp2.WSGIApplication([
     ('/viewallstreams', viewStreams),
     ('/viewAllPhotos',viewAllPhotos),
-    ('/mySubscribe',mySubscribe)
+    ('/mySubscribe',mySubscribe),
+    ('/androidViewNearbyPhotos/([^/]+)/([^/]+)', AndroidViewNearbyPhotos)
 ], debug=True)
